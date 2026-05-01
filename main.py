@@ -59,7 +59,7 @@ def collect_market_data() -> None:
 
     try:
         logger.info("Starting market data collection...")
-        prices = _collector.fetch_latest_prices(interval="5m", period="1d")
+        prices = _collector.fetch_all_prices(interval="5m", chunk_size=100, delay=2.0)
         inserted = _db.save_prices(prices)
         logger.info("Saved %d new price records", inserted)
     except Exception as e:
