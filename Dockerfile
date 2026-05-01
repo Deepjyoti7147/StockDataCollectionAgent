@@ -6,6 +6,7 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 FROM python:3.12-slim
 RUN useradd -r -s /sbin/nologin -d /app marketuser
 WORKDIR /app
+RUN mkdir -p /app/.cache && chown -R marketuser:marketuser /app
 COPY --from=builder /install /usr/local
 COPY --chown=marketuser:marketuser collector/ ./collector/
 COPY --chown=marketuser:marketuser data/ ./data/
