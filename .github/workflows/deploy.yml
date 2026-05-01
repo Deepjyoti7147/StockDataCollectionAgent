@@ -33,12 +33,13 @@ jobs:
             
             # Write .env
             cat > "$APP_DIR/.env" << EOF
-POSTGRES_HOST=${{ secrets.POSTGRES_HOST }}
-POSTGRES_DB=${{ secrets.POSTGRES_DB }}
-POSTGRES_USER=${{ secrets.POSTGRES_USER }}
-POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
-LOG_LEVEL=INFO
-EOF
+            POSTGRES_HOST=${{ secrets.POSTGRES_HOST }}
+            POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+            POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+            POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+            LOG_LEVEL=INFO
+            EOF
+            sed -i 's/^[[:space:]]*//' "$APP_DIR/.env"
 
             # Sync Code
             if [ ! -d "$APP_DIR/.git" ]; then
