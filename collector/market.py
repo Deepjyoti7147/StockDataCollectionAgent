@@ -7,9 +7,12 @@ import time
 import os
 import pandas as pd
 import yfinance as yf
+import requests
 from datetime import datetime
 
 logger = logging.getLogger("market_collector.yf")
+
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 class MarketCollector:
     def __init__(self, csv_path: str = "data/tickerInfo.csv"):
@@ -38,24 +41,27 @@ class MarketCollector:
             logger.error("Failed to load CSV: %s", e)
             return {}
 
-    def fetch_all_prices(self, interval: str = "5m", chunk_size: int = 100, delay: float = 2.0) -> list[dict]:
+    def fetch_all_prices(self, interval: str = "5m", chunk_size: int = 25, delay: float = 4.0) -> list[dict]:
         """
-        Fetch OHLCV data in chunks to avoid rate limits.
-        Returns a list of records ready for DB insertion.
+        Fetch OHLCV data in chunks to meet strict rate limits:
+        - 1,000 calls/hour max
+        - 4.0s delay between calls
         """
         symbols = list(self.ticker_map.keys())
         all_records = []
         
+        # Create a session with a browser-like User-Agent
+        session = requests.Session()
+        session.headers.update({"User-Agent": USER_AGENT})
+        
         # Split symbols into chunks
         chunks = [symbols[i:i + chunk_size] for i in range(0, len(symbols), chunk_size)]
         
-        logger.info("Starting bulk fetch for %d symbols in %d chunks", len(symbols), len(chunks))
+        logger.info("Starting bulk fetch for %d symbols in %d chunks (delay=%ss)", len(symbols), len(chunks), delay)
 
         for i, chunk in enumerate(chunks, 1):
             try:
-                logger.debug("Fetching chunk %d/%d (%d symbols)", i, len(chunks), len(chunk))
-                
-                # Bulk download entire chunk in one request
+                # Bulk download entire chunk
                 data = yf.download(
                     tickers=chunk,
                     period="1d",
@@ -63,8 +69,9 @@ class MarketCollector:
                     group_by='ticker',
                     auto_adjust=True,
                     prepost=False,
-                    threads=True, # Use threads for speed
-                    progress=False
+                    threads=True,
+                    progress=False,
+                    session=session # Use the session here
                 )
 
                 if data.empty:

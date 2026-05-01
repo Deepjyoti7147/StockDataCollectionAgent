@@ -58,7 +58,8 @@ def collect_market_data(force: bool = False) -> None:
 
     try:
         logger.info("Starting market data collection (force=%s)...", force)
-        prices = _collector.fetch_all_prices(interval="5m", chunk_size=100, delay=2.0)
+        # 95 calls per cycle, 10 cycles per hour = 950 calls/hour (Limit: 1000)
+        prices = _collector.fetch_all_prices(interval="5m", chunk_size=25, delay=4.0)
         inserted = _db.save_prices(prices)
         logger.info("Saved %d new price records", inserted)
     except Exception as e:
@@ -109,7 +110,7 @@ def startup_event():
     _scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
     _scheduler.add_job(
         collect_market_data,
-        trigger=IntervalTrigger(minutes=5),
+        trigger=IntervalTrigger(minutes=6),
         id="collect_prices"
     )
     _scheduler.start()
