@@ -1,5 +1,5 @@
 """
-StockDataCollectionAgent – Main Entry Point
+StockDataCollectionAgent – Main Entry Point with API Trigger
 """
 
 import logging
@@ -9,7 +9,9 @@ import signal
 from datetime import datetime
 import pytz
 
-from apscheduler.schedulers.blocking import BlockingScheduler
+from fastapi import FastAPI, BackgroundTasks
+import uvicorn
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from dotenv import load_dotenv
 
@@ -33,47 +35,56 @@ def is_market_open() -> bool:
     """Checks if NSE market is currently open (9:15 AM - 3:30 PM IST)."""
     tz = pytz.timezone("Asia/Kolkata")
     now = datetime.now(tz)
-    
-    # Monday = 0, Sunday = 6
-    if now.weekday() >= 5:
-        return False
-        
+    if now.weekday() >= 5: return False
     start_time = now.replace(hour=9, minute=15, second=0, microsecond=0)
     end_time = now.replace(hour=15, minute=30, second=0, microsecond=0)
-    
     return start_time <= now <= end_time
 
-# ── Globals ───────────────────────────────────────────────────────────────────
+# ── Globals & App ─────────────────────────────────────────────────────────────
 
 _db = None
 _collector = None
 _scheduler = None
 
+app = FastAPI(title="StockDataCollectionAgent API")
+
 # ── Jobs ──────────────────────────────────────────────────────────────────────
 
-def collect_market_data() -> None:
+def collect_market_data(force: bool = False) -> None:
     """Fetch and store latest price data."""
-    if not is_market_open():
+    if not force and not is_market_open():
         logger.info("Market is currently closed. Skipping run.")
         return
 
     try:
-        logger.info("Starting market data collection...")
+        logger.info("Starting market data collection (force=%s)...", force)
         prices = _collector.fetch_all_prices(interval="5m", chunk_size=100, delay=2.0)
         inserted = _db.save_prices(prices)
         logger.info("Saved %d new price records", inserted)
     except Exception as e:
         logger.exception("Market collection failed: %s", e)
 
+# ── API Endpoints ─────────────────────────────────────────────────────────────
+
+@app.get("/status")
+def get_status():
+    """Check health and last run status."""
+    return {
+        "status": "running",
+        "market_open": is_market_open(),
+        "time_ist": datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
+    }
+
+@app.post("/collect")
+def trigger_collection(background_tasks: BackgroundTasks):
+    """Manually trigger a collection cycle in the background."""
+    background_tasks.add_task(collect_market_data, force=True)
+    return {"message": "Collection triggered successfully"}
+
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
-def _shutdown(signum, frame) -> None:
-    logger.info("Shutting down...")
-    if _scheduler: _scheduler.shutdown(wait=False)
-    if _db: _db.close()
-    sys.exit(0)
-
-def main() -> None:
+@app.on_event("startup")
+def startup_event():
     global _db, _collector, _scheduler
     
     load_dotenv()
@@ -94,24 +105,23 @@ def main() -> None:
     
     _collector = MarketCollector()
     
-    signal.signal(signal.SIGTERM, _shutdown)
-    signal.signal(signal.SIGINT, _shutdown)
-
-    _scheduler = BlockingScheduler(timezone="Asia/Kolkata")
-    
-    # Run every 5 minutes
+    # Start Background Scheduler
+    _scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
     _scheduler.add_job(
         collect_market_data,
         trigger=IntervalTrigger(minutes=5),
-        id="collect_prices",
-        next_run_time=datetime.now()
+        id="collect_prices"
     )
+    _scheduler.start()
+    logger.info("StockDataCollectionAgent Background Scheduler started")
 
-    logger.info("StockDataCollectionAgent started")
-    try:
-        _scheduler.start()
-    except (KeyboardInterrupt, SystemExit):
-        _shutdown(0, None)
+@app.on_event("shutdown")
+def shutdown_event():
+    logger.info("Shutting down...")
+    if _scheduler: _scheduler.shutdown()
+    if _db: _db.close()
 
 if __name__ == "__main__":
-    main()
+    # Run API server
+    port = int(os.environ.get("PORT", "8001"))
+    uvicorn.run(app, host="0.0.0.0", port=port)

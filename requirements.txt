@@ -12,3 +12,7 @@ APScheduler==3.10.4
 
 # Environment
 python-dotenv==1.0.1
+
+# API
+fastapi==0.111.0
+uvicorn==0.30.1
