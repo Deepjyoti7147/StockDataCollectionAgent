@@ -1,0 +1,14 @@
+# StockDataCollectionAgent dependencies
+
+# Market Data
+yfinance==0.2.54
+pandas==2.2.2
+
+# PostgreSQL
+psycopg2-binary==2.9.10
+
+# Scheduler
+APScheduler==3.10.4
+
+# Environment
+python-dotenv==1.0.1
