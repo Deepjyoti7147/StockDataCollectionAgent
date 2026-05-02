@@ -73,29 +73,37 @@ class MarketCollector:
                 if data.empty:
                     continue
 
-                # For single ticker, yf.download returns flat columns (Open, High, Low, Close, Volume)
+                # For single ticker, yf.download returns flat columns or a single-ticker MultiIndex
                 symbol_df = data.dropna()
                 company_name = self.ticker_map.get(symbol)
                 
                 for timestamp, row in symbol_df.iterrows():
+                    # If yfinance returned a MultiIndex, row['Open'] might be a Series instead of a scalar.
+                    o = float(row['Open'].iloc[0]) if isinstance(row['Open'], pd.Series) else float(row['Open'])
+                    h = float(row['High'].iloc[0]) if isinstance(row['High'], pd.Series) else float(row['High'])
+                    l = float(row['Low'].iloc[0]) if isinstance(row['Low'], pd.Series) else float(row['Low'])
+                    c = float(row['Close'].iloc[0]) if isinstance(row['Close'], pd.Series) else float(row['Close'])
+                    v = int(row['Volume'].iloc[0]) if isinstance(row['Volume'], pd.Series) else int(row['Volume'])
+
                     all_records.append({
                         "symbol": symbol,
                         "company_name": company_name,
                         "timestamp": timestamp.to_pydatetime(),
-                        "open": float(row['Open']),
-                        "high": float(row['High']),
-                        "low": float(row['Low']),
-                        "close": float(row['Close']),
-                        "volume": int(row['Volume']),
+                        "open": o,
+                        "high": h,
+                        "low": l,
+                        "close": c,
+                        "volume": v,
                         "interval": interval
                     })
 
-                # Politeness delay to ensure we stay under 1,000 requests per hour
-                if i < len(symbols):
-                    time.sleep(delay)
-
             except Exception as e:
                 logger.error("Error fetching %s: %s", symbol, e)
+            
+            finally:
+                # Politeness delay MUST run to ensure we stay under 1,000 requests per hour
+                if i < len(symbols):
+                    time.sleep(delay)
 
         logger.info("Fetch complete. Total records gathered: %d", len(all_records))
         return all_records
