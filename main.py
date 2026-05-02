@@ -12,7 +12,7 @@ import pytz
 from fastapi import FastAPI, BackgroundTasks
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 
 from collector.db import DBHandler
@@ -51,15 +51,11 @@ app = FastAPI(title="StockDataCollectionAgent API")
 # ── Jobs ──────────────────────────────────────────────────────────────────────
 
 def collect_market_data(force: bool = False) -> None:
-    """Fetch and store latest price data."""
-    if not force and not is_market_open():
-        logger.info("Market is currently closed. Skipping run.")
-        return
-
+    """Fetch and store latest EOD price data."""
     try:
-        logger.info("Starting market data collection (force=%s)...", force)
-        # 95 calls per cycle, 10 cycles per hour = 950 calls/hour (Limit: 1000)
-        prices = _collector.fetch_all_prices(interval="5m", chunk_size=25, delay=4.0)
+        logger.info("Starting EOD market data collection (force=%s)...", force)
+        # Fetch sequentially to keep rate limit below 1000/hr (delay=4.0)
+        prices = _collector.fetch_all_prices(interval="1d", delay=4.0)
         inserted = _db.save_prices(prices)
         logger.info("Saved %d new price records", inserted)
     except Exception as e:
@@ -110,7 +106,7 @@ def startup_event():
     _scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
     _scheduler.add_job(
         collect_market_data,
-        trigger=IntervalTrigger(minutes=6),
+        trigger=CronTrigger(hour=16, minute=0), # EOD run at 4:00 PM IST
         id="collect_prices"
     )
     _scheduler.start()

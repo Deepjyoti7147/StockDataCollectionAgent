@@ -41,11 +41,11 @@ class MarketCollector:
             logger.error("Failed to load CSV: %s", e)
             return {}
 
-    def fetch_all_prices(self, interval: str = "5m", chunk_size: int = 25, delay: float = 4.0) -> list[dict]:
+    def fetch_all_prices(self, interval: str = "1d", delay: float = 4.0) -> list[dict]:
         """
-        Fetch OHLCV data in chunks to meet strict rate limits:
+        Fetch OHLCV data sequentially one-by-one to meet strict rate limits:
         - 1,000 calls/hour max
-        - 4.0s delay between calls
+        - ~4.0s delay between calls
         """
         symbols = list(self.ticker_map.keys())
         all_records = []
@@ -54,56 +54,48 @@ class MarketCollector:
         session = requests.Session()
         session.headers.update({"User-Agent": USER_AGENT})
         
-        # Split symbols into chunks
-        chunks = [symbols[i:i + chunk_size] for i in range(0, len(symbols), chunk_size)]
-        
-        logger.info("Starting bulk fetch for %d symbols in %d chunks (delay=%ss)", len(symbols), len(chunks), delay)
+        logger.info("Starting sequential EOD fetch for %d symbols (delay=%ss)", len(symbols), delay)
 
-        for i, chunk in enumerate(chunks, 1):
+        for i, symbol in enumerate(symbols, 1):
             try:
-                # Bulk download entire chunk
+                # Sequential download one symbol at a time
                 data = yf.download(
-                    tickers=chunk,
+                    tickers=symbol,
                     period="1d",
                     interval=interval,
-                    group_by='ticker',
                     auto_adjust=True,
                     prepost=False,
-                    threads=True,
+                    threads=False,
                     progress=False,
-                    session=session # Use the session here
+                    session=session
                 )
 
                 if data.empty:
                     continue
 
-                # Parse the multi-index DataFrame
-                for symbol in chunk:
-                    if symbol not in data:
-                        continue
-                        
-                    symbol_df = data[symbol].dropna()
-                    company_name = self.ticker_map.get(symbol)
-                    
-                    for timestamp, row in symbol_df.iterrows():
-                        all_records.append({
-                            "symbol": symbol,
-                            "company_name": company_name,
-                            "timestamp": timestamp.to_pydatetime(),
-                            "open": float(row['Open']),
-                            "high": float(row['High']),
-                            "low": float(row['Low']),
-                            "close": float(row['Close']),
-                            "volume": int(row['Volume']),
-                            "interval": interval
-                        })
+                # For single ticker, yf.download returns flat columns (Open, High, Low, Close, Volume)
+                symbol_df = data.dropna()
+                company_name = self.ticker_map.get(symbol)
+                
+                for timestamp, row in symbol_df.iterrows():
+                    all_records.append({
+                        "symbol": symbol,
+                        "company_name": company_name,
+                        "timestamp": timestamp.to_pydatetime(),
+                        "open": float(row['Open']),
+                        "high": float(row['High']),
+                        "low": float(row['Low']),
+                        "close": float(row['Close']),
+                        "volume": int(row['Volume']),
+                        "interval": interval
+                    })
 
-                # Politeness delay between chunk requests
-                if i < len(chunks):
+                # Politeness delay to ensure we stay under 1,000 requests per hour
+                if i < len(symbols):
                     time.sleep(delay)
 
             except Exception as e:
-                logger.error("Error in chunk %d: %s", i, e)
+                logger.error("Error fetching %s: %s", symbol, e)
 
         logger.info("Fetch complete. Total records gathered: %d", len(all_records))
         return all_records
