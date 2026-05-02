@@ -16,7 +16,7 @@ logger = logging.getLogger("market_collector.db")
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS stock_prices (
-    id          BIGSERIAL PRIMARY KEY,
+    id              BIGSERIAL PRIMARY KEY,
     symbol          TEXT        NOT NULL,
     company_name    TEXT,
     timestamp       TIMESTAMPTZ NOT NULL,
@@ -24,7 +24,10 @@ CREATE TABLE IF NOT EXISTS stock_prices (
     high            REAL,
     low             REAL,
     close           REAL,
+    adj_close       REAL,
     volume          BIGINT,
+    dividends       REAL,
+    stock_splits    REAL,
     interval        TEXT        NOT NULL, -- '1m', '5m', '1d'
     fetched_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
@@ -82,9 +85,12 @@ class DBHandler:
                         cur.execute(
                             """
                             INSERT INTO stock_prices 
-                                (symbol, company_name, timestamp, open, high, low, close, volume, interval)
+                                (symbol, company_name, timestamp, open, high, low, close,
+                                 adj_close, volume, dividends, stock_splits, interval)
                             VALUES 
-                                (%(symbol)s, %(company_name)s, %(timestamp)s, %(open)s, %(high)s, %(low)s, %(close)s, %(volume)s, %(interval)s)
+                                (%(symbol)s, %(company_name)s, %(timestamp)s, %(open)s, %(high)s,
+                                 %(low)s, %(close)s, %(adj_close)s, %(volume)s, %(dividends)s,
+                                 %(stock_splits)s, %(interval)s)
                             ON CONFLICT (symbol, timestamp, interval) DO NOTHING
                             """,
                             row
