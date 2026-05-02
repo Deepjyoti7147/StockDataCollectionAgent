@@ -136,26 +136,20 @@ class MarketCollector:
 
     # ── Per-symbol EOD fetch (from stock_fetcher.get_eod_data) ───────────────
 
-    def _fetch_symbol(self, symbol: str, days: int = 365) -> pd.DataFrame | None:
-        """
-        Fetch up to `days` of EOD history for a single symbol using ticker.history().
-        Ported from stock_fetcher.get_eod_data — uses auto_adjust=False to get raw
-        OHLC + Adj Close, Dividends, and Stock Splits columns.
-        """
+    def _fetch_symbol(self, symbol: str) -> pd.DataFrame | None:
+        """Fetch 1 year of EOD history for a single symbol. Skips on rate limit."""
+        import yfinance.exceptions as yf_exc
+
         if not self._acquire_yahoo_request_slot():
-            logger.warning("Rate limit — skipping %s this cycle", symbol)
+            logger.warning("Sliding-window limit reached — skipping %s", symbol)
             return None
 
         try:
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=days)
-
             ticker = yf.Ticker(symbol)
             data = ticker.history(
-                start=start_date,
-                end=end_date,
+                period="1y",
                 interval="1d",
-                auto_adjust=False,   # keeps raw OHLC + separate Adj Close column
+                auto_adjust=False,  # keeps raw OHLC + separate Adj Close column
             )
 
             if data is None or data.empty:
@@ -164,20 +158,31 @@ class MarketCollector:
 
             return data
 
+        except yf_exc.YFRateLimitError:
+            logger.warning("Rate limited on %s — skipping", symbol)
+            return None
+
         except Exception as e:
             logger.error("Error fetching %s: %s", symbol, e)
             return None
 
+
+
+
     # ── Bulk collector called by the scheduler ────────────────────────────────
 
-    def fetch_all_prices(self, interval: str = "1d", delay: float = 4.0) -> list[dict]:
+    def fetch_all_prices(self, db, interval: str = "1d", delay: float = 5.0) -> tuple[int, int]:
         """
         Fetch EOD data for every loaded symbol one at a time.
-        Returns a flat list of price records ready for db.save_prices().
+        After each symbol is fetched, its records are immediately saved to the DB
+        before moving on to the next symbol — no in-memory batch accumulation.
+
+        Returns (total_rows_fetched, total_rows_inserted).
         """
         symbols = list(self.ticker_map.keys())
-        all_records: list[dict] = []
         total = len(symbols)
+        total_fetched = 0
+        total_inserted = 0
 
         logger.info("Starting sequential EOD fetch for %d symbols (delay=%.1fs)", total, delay)
 
@@ -189,6 +194,7 @@ class MarketCollector:
                     continue
 
                 company_name = self.ticker_map.get(symbol, symbol)
+                records = []
 
                 for timestamp, row in data.iterrows():
 
@@ -209,7 +215,7 @@ class MarketCollector:
                         except (TypeError, ValueError):
                             return None
 
-                    all_records.append({
+                    records.append({
                         "symbol":       symbol,
                         "company_name": company_name,
                         "timestamp":    timestamp.to_pydatetime(),
@@ -224,7 +230,14 @@ class MarketCollector:
                         "interval":     interval,
                     })
 
-                logger.info("Fetched %s — %d rows (%d/%d)", symbol, len(data), i, total)
+                # ── Save immediately after each symbol ────────────────────────
+                inserted = db.save_prices(records)
+                total_fetched += len(records)
+                total_inserted += inserted
+                logger.info(
+                    "Saved %s — fetched=%d inserted=%d (%d/%d)",
+                    symbol, len(records), inserted, i, total,
+                )
 
             except Exception as e:
                 logger.error("Unexpected error for %s: %s", symbol, e)
@@ -233,5 +246,8 @@ class MarketCollector:
                 if i < total:
                     time.sleep(delay)
 
-        logger.info("Fetch complete. Total records: %d", len(all_records))
-        return all_records
+        logger.info(
+            "Fetch complete. total_fetched=%d total_inserted=%d",
+            total_fetched, total_inserted,
+        )
+        return total_fetched, total_inserted

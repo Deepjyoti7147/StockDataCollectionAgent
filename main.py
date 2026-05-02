@@ -54,10 +54,8 @@ def collect_market_data(force: bool = False) -> None:
     """Fetch and store latest EOD price data."""
     try:
         logger.info("Starting EOD market data collection (force=%s)...", force)
-        # Fetch sequentially to keep rate limit below 1000/hr (delay=4.0)
-        prices = _collector.fetch_all_prices(interval="1d", delay=4.0)
-        inserted = _db.save_prices(prices)
-        logger.info("Saved %d new price records", inserted)
+        fetched, inserted = _collector.fetch_all_prices(db=_db, interval="1d", delay=5.0)
+        logger.info("Collection complete — fetched=%d inserted=%d", fetched, inserted)
     except Exception as e:
         logger.exception("Market collection failed: %s", e)
 
@@ -106,7 +104,7 @@ def startup_event():
     _scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
     _scheduler.add_job(
         collect_market_data,
-        trigger=CronTrigger(hour=16, minute=0), # EOD run at 4:00 PM IST
+        trigger=CronTrigger(hour=16, minute=0, day_of_week='mon-fri'), # EOD run at 4:00 PM IST on weekdays
         id="collect_prices"
     )
     _scheduler.start()
