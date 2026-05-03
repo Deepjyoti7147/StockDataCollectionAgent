@@ -86,6 +86,64 @@ def trigger_collection(background_tasks: BackgroundTasks):
     background_tasks.add_task(collect_market_data, force=True)
     return {"message": "Collection triggered successfully"}
 
+def _get_fundamentals_data(ticker: str):
+    if not _db or not _collector:
+        raise ValueError("Service not fully initialized")
+    
+    ticker_symbol = ticker.upper()
+    if not (ticker_symbol.endswith(".NS") or ticker_symbol.endswith(".BO")):
+        ticker_symbol = f"{ticker_symbol}.NS"
+        
+    data = _collector.get_fundamentals(ticker_symbol, _db)
+    if not data:
+        raise ValueError(f"Could not fetch fundamentals for {ticker_symbol}")
+    return data
+
+@app.get("/fundamentals/{ticker}/balancesheet/quarterly")
+def fetch_bs_quarterly(ticker: str):
+    """Fetch quarterly balance sheet for a ticker."""
+    try:
+        data = _get_fundamentals_data(ticker)
+        return data.get("balance_sheet_quarterly") or []
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/fundamentals/{ticker}/balancesheet/annual")
+def fetch_bs_annual(ticker: str):
+    """Fetch annual balance sheet for a ticker."""
+    try:
+        data = _get_fundamentals_data(ticker)
+        return data.get("balance_sheet_annual") or []
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/fundamentals/{ticker}/cashflow/quarterly")
+def fetch_cf_quarterly(ticker: str):
+    """Fetch quarterly cash flow statement for a ticker."""
+    try:
+        data = _get_fundamentals_data(ticker)
+        return data.get("cash_flow_quarterly") or []
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/fundamentals/{ticker}/cashflow/annual")
+def fetch_cf_annual(ticker: str):
+    """Fetch annual cash flow statement for a ticker."""
+    try:
+        data = _get_fundamentals_data(ticker)
+        return data.get("cash_flow_annual") or []
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/fundamentals/{ticker}/profile")
+def fetch_asset_profile(ticker: str):
+    """Fetch the asset profile/company info for a ticker."""
+    try:
+        data = _get_fundamentals_data(ticker)
+        return data.get("asset_profile") or {}
+    except Exception as e:
+        return {"error": str(e)}
+
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 @app.on_event("startup")

@@ -36,6 +36,16 @@ CREATE TABLE IF NOT EXISTS stock_prices (
 
 CREATE INDEX IF NOT EXISTS idx_prices_symbol_time ON stock_prices (symbol, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_prices_timestamp   ON stock_prices (timestamp DESC);
+
+CREATE TABLE IF NOT EXISTS stock_fundamentals (
+    symbol                  TEXT PRIMARY KEY,
+    balance_sheet_quarterly JSONB,
+    balance_sheet_annual    JSONB,
+    cash_flow_quarterly     JSONB,
+    cash_flow_annual        JSONB,
+    asset_profile           JSONB,
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 """
 
 class DBHandler:
@@ -104,6 +114,48 @@ class DBHandler:
                         logger.error("Error inserting %s: %s", row.get('symbol'), e)
                         conn.rollback()
         return inserted
+
+    def get_fundamentals(self, symbol: str) -> dict | None:
+        """Fetch fundamental data for a symbol from the database."""
+        with self._get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                cur.execute("SELECT * FROM stock_fundamentals WHERE symbol = %s", (symbol,))
+                row = cur.fetchone()
+                return dict(row) if row else None
+
+    def save_fundamentals(self, symbol: str, data: dict) -> None:
+        """Save or update fundamental data for a symbol."""
+        import json
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                try:
+                    cur.execute(
+                        """
+                        INSERT INTO stock_fundamentals 
+                            (symbol, balance_sheet_quarterly, balance_sheet_annual, 
+                             cash_flow_quarterly, cash_flow_annual, asset_profile, updated_at)
+                        VALUES 
+                            (%(symbol)s, %(bs_q)s, %(bs_a)s, %(cf_q)s, %(cf_a)s, %(profile)s, NOW())
+                        ON CONFLICT (symbol) DO UPDATE SET
+                            balance_sheet_quarterly = EXCLUDED.balance_sheet_quarterly,
+                            balance_sheet_annual = EXCLUDED.balance_sheet_annual,
+                            cash_flow_quarterly = EXCLUDED.cash_flow_quarterly,
+                            cash_flow_annual = EXCLUDED.cash_flow_annual,
+                            asset_profile = EXCLUDED.asset_profile,
+                            updated_at = NOW();
+                        """,
+                        {
+                            "symbol": symbol,
+                            "bs_q": json.dumps(data.get("balance_sheet_quarterly")),
+                            "bs_a": json.dumps(data.get("balance_sheet_annual")),
+                            "cf_q": json.dumps(data.get("cash_flow_quarterly")),
+                            "cf_a": json.dumps(data.get("cash_flow_annual")),
+                            "profile": json.dumps(data.get("asset_profile"))
+                        }
+                    )
+                except Exception as e:
+                    logger.error("Error saving fundamentals for %s: %s", symbol, e)
+                    conn.rollback()
 
     def cleanup_old_data(self, months: int = 18) -> int:
         """Deletes stock prices older than `months` months."""

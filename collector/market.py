@@ -292,3 +292,82 @@ class MarketCollector:
             total_fetched, total_inserted,
         )
         return total_fetched, total_inserted
+
+    def get_fundamentals(self, symbol: str, db) -> dict:
+        """Fetch fundamental data for a symbol (DB first, then API)."""
+        import numpy as np
+        
+        cached = db.get_fundamentals(symbol)
+        if cached:
+            return cached
+            
+        logger.info("Fetching fundamentals for %s from API...", symbol)
+        try:
+            from yahooquery import Ticker as YQTicker
+            t = YQTicker(symbol)
+        except ImportError:
+            logger.error("yahooquery is not installed.")
+            return {}
+        
+        def _clean_df(df) -> list | None:
+            if not isinstance(df, pd.DataFrame):
+                return None
+            if df.empty:
+                return None
+            try:
+                if "symbol" in df.index.names:
+                    df = df.reset_index(level="symbol", drop=True)
+                
+                df = df.replace({np.nan: None})
+                
+                # Reset date index to column if it exists to preserve the date
+                if df.index.name in ["date", "asOfDate"] or isinstance(df.index, pd.DatetimeIndex):
+                    df = df.reset_index()
+                
+                records = df.to_dict(orient="records")
+                for record in records:
+                    for k, v in record.items():
+                        if isinstance(v, pd.Timestamp):
+                            record[k] = str(v)
+                return records
+            except Exception as e:
+                logger.error("Error cleaning DataFrame: %s", e)
+                return None
+        
+        try:
+            bs_a = _clean_df(t.balance_sheet())
+            bs_q = _clean_df(t.balance_sheet(frequency="q"))
+            cf_a = _clean_df(t.cash_flow())
+            cf_q = _clean_df(t.cash_flow(frequency="q"))
+            
+            profile = t.asset_profile
+            if isinstance(profile, dict):
+                if symbol in profile:
+                    profile = profile[symbol]
+                    if isinstance(profile, str):  # Sometimes returns an error message as string
+                        profile = None
+                else:
+                    # If the symbol isn't in the dict (e.g. invalid '{TCS}.NS' split by yahooquery), discard the garbage dict
+                    profile = None
+                
+            data = {
+                "balance_sheet_annual": bs_a,
+                "balance_sheet_quarterly": bs_q,
+                "cash_flow_annual": cf_a,
+                "cash_flow_quarterly": cf_q,
+                "asset_profile": profile
+            }
+            
+            # Prevent saving a completely empty record to the database
+            if not any(v for v in data.values() if v is not None):
+                logger.warning("No fundamental data found for %s. Skipping DB save.", symbol)
+                return {}
+            
+            db.save_fundamentals(symbol, data)
+            
+            # Re-fetch from DB to ensure format matches what the API expects (e.g., loaded JSON)
+            return db.get_fundamentals(symbol) or data
+            
+        except Exception as e:
+            logger.error("Failed to fetch fundamentals for %s: %s", symbol, e)
+            return {}

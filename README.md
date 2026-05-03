@@ -24,6 +24,11 @@ A high-performance, memory-efficient market data collector designed to run on lo
 
 - `GET /status`: Returns current agent health, market status, and server time.
 - `POST /collect`: Manually triggers a full collection cycle for all 2,300+ stocks (bypasses market hours check).
+- `GET /fundamentals/{ticker}/balancesheet/quarterly`: Fetches quarterly balance sheet.
+- `GET /fundamentals/{ticker}/balancesheet/annual`: Fetches annual balance sheet.
+- `GET /fundamentals/{ticker}/cashflow/quarterly`: Fetches quarterly cash flow statement.
+- `GET /fundamentals/{ticker}/cashflow/annual`: Fetches annual cash flow statement.
+- `GET /fundamentals/{ticker}/profile`: Fetches company info and asset profile.
 
 ## 📋 Environment Variables
 
@@ -50,7 +55,7 @@ This project is configured for automated deployment via GitHub Actions.
 
 ## 🗄️ Database Schema
 
-The agent automatically manages the `stock_prices` table:
+The agent automatically manages the `stock_prices` and `stock_fundamentals` tables:
 
 ```sql
 CREATE TABLE stock_prices (
@@ -69,6 +74,16 @@ CREATE TABLE stock_prices (
     interval        TEXT NOT NULL,
     fetched_at      TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT stock_prices_uq UNIQUE (symbol, timestamp, interval)
+);
+
+CREATE TABLE stock_fundamentals (
+    symbol                  TEXT PRIMARY KEY,
+    balance_sheet_quarterly JSONB,
+    balance_sheet_annual    JSONB,
+    cash_flow_quarterly     JSONB,
+    cash_flow_annual        JSONB,
+    asset_profile           JSONB,
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ```
 
