@@ -136,13 +136,52 @@ class MarketCollector:
 
     # ── Per-symbol EOD fetch (from stock_fetcher.get_eod_data) ───────────────
 
+    def _fetch_symbol_fallback(self, symbol: str) -> pd.DataFrame | None:
+        """
+        Fallback using yahooquery, which bypasses yfinance rate limits
+        due to different endpoints and session handling.
+        """
+        try:
+            from yahooquery import Ticker as YQTicker
+        except ImportError:
+            logger.warning("yahooquery not installed. Cannot use fallback.")
+            return None
+            
+        try:
+            logger.info("Using yahooquery fallback for %s", symbol)
+            t = YQTicker(symbol)
+            df = t.history(period="1y", interval="1d")
+            
+            if df is None or df.empty or isinstance(df, dict):
+                return None
+                
+            if "symbol" in df.index.names:
+                df = df.reset_index(level="symbol", drop=True)
+                
+            rename_map = {
+                "open": "Open",
+                "high": "High",
+                "low": "Low",
+                "close": "Close",
+                "volume": "Volume",
+                "adjclose": "Adj Close",
+                "dividends": "Dividends",
+                "splits": "Stock Splits"
+            }
+            df = df.rename(columns=rename_map)
+            df.index = pd.to_datetime(df.index)
+            return df
+        except Exception as e:
+            logger.error("Fallback failed for %s: %s", symbol, e)
+            return None
+
     def _fetch_symbol(self, symbol: str) -> pd.DataFrame | None:
-        """Fetch 1 year of EOD history for a single symbol. Skips on rate limit."""
+        """Fetch 1 year of EOD history for a single symbol. Falls back to yahooquery on rate limit."""
         import yfinance.exceptions as yf_exc
 
         if not self._acquire_yahoo_request_slot():
-            logger.warning("Sliding-window limit reached — skipping %s", symbol)
-            return None
+            logger.warning("Sliding-window limit reached — attempting fallback for %s", symbol)
+            return self._fetch_symbol_fallback(symbol)
 
         try:
             ticker = yf.Ticker(symbol)
@@ -159,8 +198,8 @@ class MarketCollector:
             return data
 
         except yf_exc.YFRateLimitError:
-            logger.warning("Rate limited on %s — skipping", symbol)
-            return None
+            logger.warning("Rate limited on %s — attempting fallback", symbol)
+            return self._fetch_symbol_fallback(symbol)
 
         except Exception as e:
             logger.error("Error fetching %s: %s", symbol, e)
@@ -215,10 +254,12 @@ class MarketCollector:
                         except (TypeError, ValueError):
                             return None
 
+                    # Normalize daily timestamps to midnight to prevent yfinance vs yahooquery duplicates
+                    ts = timestamp.replace(hour=0, minute=0, second=0, microsecond=0) if interval == "1d" else timestamp
                     records.append({
                         "symbol":       symbol,
                         "company_name": company_name,
-                        "timestamp":    timestamp.to_pydatetime(),
+                        "timestamp":    ts.to_pydatetime(),
                         "open":         _val("Open"),
                         "high":         _val("High"),
                         "low":          _val("Low"),

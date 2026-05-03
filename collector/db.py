@@ -105,6 +105,25 @@ class DBHandler:
                         conn.rollback()
         return inserted
 
+    def cleanup_old_data(self, months: int = 18) -> int:
+        """Deletes stock prices older than `months` months."""
+        deleted = 0
+        # Approximate months as 30 days
+        cutoff_date = datetime.now() - timedelta(days=30 * months)
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                try:
+                    cur.execute(
+                        "DELETE FROM stock_prices WHERE timestamp < %s",
+                        (cutoff_date,)
+                    )
+                    deleted = cur.rowcount
+                    logger.info("Cleaned up %d rows older than %s.", deleted, cutoff_date.strftime("%Y-%m-%d"))
+                except Exception as e:
+                    logger.error("Error during cleanup: %s", e)
+                    conn.rollback()
+        return deleted
+
     def close(self):
         if self._pool:
             self._pool.closeall()

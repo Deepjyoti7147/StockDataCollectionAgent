@@ -59,6 +59,16 @@ def collect_market_data(force: bool = False) -> None:
     except Exception as e:
         logger.exception("Market collection failed: %s", e)
 
+def cleanup_database() -> None:
+    """Run database cleanup to remove records older than 18 months."""
+    try:
+        logger.info("Starting database cleanup task (older than 18 months)...")
+        if _db:
+            deleted_count = _db.cleanup_old_data(months=18)
+            logger.info("Database cleanup completed. Deleted %d old records.", deleted_count)
+    except Exception as e:
+        logger.exception("Database cleanup failed: %s", e)
+
 # ── API Endpoints ─────────────────────────────────────────────────────────────
 
 @app.get("/status")
@@ -107,6 +117,14 @@ def startup_event():
         trigger=CronTrigger(hour=16, minute=0, day_of_week='mon-fri'), # EOD run at 4:00 PM IST on weekdays
         id="collect_prices"
     )
+    
+    # Run cleanup every Sunday at 2:00 AM IST
+    _scheduler.add_job(
+        cleanup_database,
+        trigger=CronTrigger(hour=2, minute=0, day_of_week='sun'),
+        id="cleanup_db"
+    )
+    
     _scheduler.start()
     logger.info("StockDataCollectionAgent Background Scheduler started")
 

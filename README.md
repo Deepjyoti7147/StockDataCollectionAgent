@@ -8,7 +8,8 @@ A high-performance, memory-efficient market data collector designed to run on lo
 - **Market Hours Aware**: Intelligent scheduling that only polls the NSE during trading hours (9:15 AM - 3:30 PM IST) to save CPU and bandwidth.
 - **API Triggered Collection**: Built-in FastAPI server allowing manual triggers via `POST /collect`.
 - **Intelligent Deduplication**: Uses a unique constraint on `(symbol, timestamp, interval)` to ensure zero duplicate price records in the database.
-- **Rate-Limit Protection**: Implements a "polite" fetching strategy with a 2-second delay between bulk chunks to prevent IP blocking.
+- **Rate-Limit Protection & Fallback**: Implements a polite fetching strategy with a 5-second delay. If `yfinance` rate limits are hit, automatically falls back to `yahooquery` without missing a beat.
+- **Automated Data Retention**: Automatically runs a scheduled database cleanup every Sunday at 2:00 AM IST to permanently delete records older than 18 months.
 - **CSV Driven**: Easily manage your stock list by updating `data/tickerInfo.csv`.
 - **Dockerized**: Pre-configured for Docker Compose with strict memory limits (256MB).
 
@@ -61,7 +62,10 @@ CREATE TABLE stock_prices (
     high            REAL,
     low             REAL,
     close           REAL,
+    adj_close       REAL,
     volume          BIGINT,
+    dividends       REAL,
+    stock_splits    REAL,
     interval        TEXT NOT NULL,
     fetched_at      TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT stock_prices_uq UNIQUE (symbol, timestamp, interval)
