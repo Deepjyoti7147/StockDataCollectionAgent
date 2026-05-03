@@ -71,6 +71,9 @@ class DBHandler:
         with self._get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(SCHEMA_SQL)
+                cur.execute("ALTER TABLE stock_prices ADD COLUMN IF NOT EXISTS adj_close REAL;")
+                cur.execute("ALTER TABLE stock_prices ADD COLUMN IF NOT EXISTS dividends REAL;")
+                cur.execute("ALTER TABLE stock_prices ADD COLUMN IF NOT EXISTS stock_splits REAL;")
 
     def save_prices(self, price_data: list[dict]) -> int:
         """Bulk insert prices; returns number of new rows inserted."""
@@ -99,6 +102,7 @@ class DBHandler:
                             inserted += 1
                     except Exception as e:
                         logger.error("Error inserting %s: %s", row.get('symbol'), e)
+                        conn.rollback()
         return inserted
 
     def close(self):
